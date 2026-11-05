@@ -8,28 +8,45 @@ import {
 } from "react-native";
 import * as Location from "expo-location";
 
+import * as TaskManager from "expo-task-manager";
+
+const locationTask = "background-location-task";
+
+TaskManager.defineTask(locationTask, ({ data, error }) => {
+  if (error) {
+    console.error("❌ Erro na tarefa de background", error);
+    return;
+  }
+  if (data) {
+    const { locations } = data; // 'locations' é um array de coordenadas recebidas do GPS
+
+    const latestLocation = locations[locations.length - 1];
+    console.log("📍 [Background] Coordenada recebida:", latestLocation.coords);
+  }
+});
+
 export default function App() {
   const [location, setLocation] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [connection, setConnection] = useState(null);
+  const [isTracking, setIsTracking] = useState(false);
 
   // Retorno do useEffect executa quando o componente é destruído/fechado
   useEffect(() => {
     return () => {
-      if (connection) {
-        connection.remove();
+      if (isTracking) {
+        Location.stopLocationUpdatesAsync(locationTask);
       }
     };
-  }, [connection]);
+  }, [isTracking]);
 
   // Função para obter a localização do dispositívo
   async function toggleTracking() {
     setErrorMsg(null);
 
-    if (connection !== null) {
-      connection.remove();
-      setConnection(null);
+    if (isTracking) {
+      await Location.stopLocationUpdatesAsync(locationTask);
+      setIsTracking(false);
       console.log("✅ Conexão encerrada com sucesso.");
       return;
     }
@@ -38,14 +55,41 @@ export default function App() {
 
     try {
       // Requisitando permissão para obter a localização em primeiro plano
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        setErrorMsg("Permissão de acesso à localização negada.");
-        console.log("❌ Permissão de acesso à localização negada.");
+      const { status: fgStatus } =
+        await Location.requestForegroundPermissionsAsync();
+      if (fgStatus !== "granted") {
+        setErrorMsg(
+          "Permissão de acesso à localização em primeiro plano negada.",
+        );
+        console.log(
+          "⚠️ Permissão de acesso à localização em primeiro plano negada.",
+        );
         return;
       }
 
-      console.log("✅ Permissão de acesso à localização aceita.");
+      // Requisitando permissão para obter a localização em segundo plano
+
+      console.log(
+        "1️⃣ Permissão de acesso à localização em primeiro plano aceita.",
+      );
+      const { status: bgStatus } =
+        await Location.requestBackgroundPermissionsAsync();
+      if (bgStatus !== "granted") {
+        setErrorMsg(
+          "Permissão de acesso à localização em segundo plano negada.",
+        );
+        console.log(
+          "❌ Permissão de acesso à localização em segundo plano negada.",
+        );
+        return;
+      }
+
+      console.log(
+        "2️⃣ Permissão de acesso à localização em segundo plano aceita.",
+      );
+      console.log(
+        "✅ Permissões de acesso à localização em primeiro e segundo plano aceitas.",
+      );
 
       // Tenta obter a última posição conhecida (instantâneo)
       let initialPosition = await Location.getLastKnownPositionAsync({});
@@ -61,19 +105,18 @@ export default function App() {
       setLocation(initialPosition.coords);
 
       // Assinatura para rastreamento em tempo real
-      const newConnection = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          distanceInterval: 0,
-          timeInterval: 1000,
-        },
-        (currentLocation) => {
-          console.log("📍 Nova coordenada recebida:", currentLocation.coords);
-          setLocation(currentLocation.coords);
-        },
-      );
+      await Location.startLocationUpdatesAsync(locationTask, {
+        accuracy: Location.Accuracy.High,
+        distanceInterval: 0,
+        timeInterval: 1000,
 
-      setConnection(newConnection);
+        foregroundService: {
+          notificationTitle: "Van Tracker",
+          notificationBody: "Rastreamento da rota em andamento...",
+          notificationColor: "#0066cc",
+        },
+      });
+      setIsTracking(true);
       console.log("✅ Conexão realizada com sucesso.");
     } catch (error) {
       setErrorMsg(`Erro (${error.name || "GPS"}): ${error.message}`);
@@ -91,7 +134,7 @@ export default function App() {
 
       {errorMsg && <Text style={styles.error}>{errorMsg}</Text>}
 
-      {location && !loading && connection && (
+      {location && !loading && isTracking && (
         <View style={styles.card}>
           <Text style={styles.label}>Latitude:</Text>
           <Text style={styles.value}>{location.latitude}</Text>
@@ -109,12 +152,12 @@ export default function App() {
       <TouchableOpacity
         style={[
           styles.button,
-          connection ? styles.buttonStop : styles.buttonStart,
+          isTracking ? styles.buttonStop : styles.buttonStart,
         ]}
         onPress={toggleTracking}
       >
         <Text style={styles.buttonText}>
-          {connection ? "Parar Corrida" : "Iniciar Corrida"}
+          {isTracking ? "Parar Corrida" : "Iniciar Corrida"}
         </Text>
       </TouchableOpacity>
     </View>
